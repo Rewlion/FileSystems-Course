@@ -7,91 +7,84 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <errno.h>
-
-const char* proc = "/proc/";
-const char* statf = "/stat";
+#include <ctype.h>
 
 struct stat_info
 {
 	int pid;
-	char* comm;
+	char comm[1024];
 	char state;
 	int ppid;
 	int pgrp;	
 };
 
 char* get_stat_file(const char* pid)
-{
-	const size_t total_size = strlen(proc) + strlen(pid) + strlen(statf) + 1;
-	char* stat_file = (char*)calloc(total_size,sizeof(char));
-	strcpy(stat_file, proc);
-	strcat(stat_file, pid);
-	strcat(stat_file, statf);
+{	
+	const char* frm   = "/proc/%s/stat";
+	const int str_len = snprintf(NULL, 0, frm, pid) + 1;
+	char* stat_file   = calloc(str_len, 1);
+	snprintf(stat_file, str_len, frm, pid);
 
 	return stat_file;
 }
 
-void print_stat_info(struct stat_info* stat_info)
-{
-	if(stat_info)
-	{
-		printf("%c %d %d %d %s \n", stat_info->state, stat_info->pid, stat_info->ppid, stat_info->pgrp, stat_info->comm);
-	}
-}
-
-struct stat_info* allocate_stat_info()
-{
-	struct stat_info* stat_info = (struct stat_info*)calloc(1, sizeof(struct stat_info));
-                   	  stat_info->comm = (char*)calloc(1024,sizeof(char));
-
-    return stat_info;
+void print_stat_info(const struct stat_info* stat_info)
+{	
+	printf("%c %d %d %d %s \n", stat_info->state, stat_info->pid, stat_info->ppid, stat_info->pgrp, stat_info->comm);	
 }
 
 struct stat_info* get_stat_info_for_pid(const char* pid)
 {
-	char*             stat_file_name = get_stat_file(pid);
-	FILE*             stat_file = fopen(stat_file_name, "r");
-	struct stat_info* stat_info = allocate_stat_info();
+	struct stat_info* si = NULL;
+	char*             fn = get_stat_file(pid);
+	FILE*             ff = fopen(fn, "r");
+	
+	if(ff == NULL)
+		goto out;
 
-	if((stat_file != NULL) && (stat_info != NULL))
+	si = calloc(1, sizeof(*si));
+	if(si != NULL)
 	{
-		fscanf(stat_file, "%d %s %c %d %d", 
-			&stat_info->pid, 
-			stat_info->comm, 
-			&stat_info->state, 
-			&stat_info->ppid, 
-			&stat_info->pgrp);
-
-		return stat_info;
+		fscanf(ff, "%d %s %c %d %d", 
+		&si->pid, 
+		si->comm, 
+		&si->state, 
+		&si->ppid, 
+		&si->pgrp);
 	}
-	else
-		return NULL;
+
+out:
+	fclose(ff);
+	free(fn);
+	return si;
 }
 
 void print_stat_info_for_pid(const char* pid)
 {
-	struct stat_info* stat_info = get_stat_info_for_pid(pid);
-	if(stat_info != NULL)				
-		print_stat_info(stat_info);
+	struct stat_info* si = get_stat_info_for_pid(pid);
+	
+	if(si != NULL)				
+		print_stat_info(si);
 	else
 		printf("Error: cannot get stat info for pid:%s", pid);
+
+	free(si);
 }
 
 int check_if_name_is_pid(const char* name)
 {
-	size_t len = strlen(name);
-	for(size_t i = 0; i < len; ++i)
-	{
-		if((name[i] < '0') || name[i] > '9')
+	const size_t len = strlen(name);
+	
+	for(int i = 0; i < len; ++i)
+		if(!isdigit(name[i]))
 			return 0;
-	}
-
+	
 	return 1;
 }
 
 int main(int argc, char** argv)
 {
-	DIR* proc_dir = opendir(proc);
+	DIR* proc_dir = opendir("/proc/");
 	
 	if(proc_dir != NULL)
 	{
@@ -105,5 +98,7 @@ int main(int argc, char** argv)
 		}
 	}
 	else
-		printf("Error: cannot access /proc dir: %s\n", strerror(errno));		
+		printf("Error: cannot access /proc dir: %s\n", strerror(errno));
+
+	closedir(proc_dir);
 }

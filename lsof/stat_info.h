@@ -3,7 +3,7 @@
 struct stat_info
 {
 	int pid;
-	char* comm;
+	char comm[1024];
 	char state;
 	int ppid;
 	int pgrp;	

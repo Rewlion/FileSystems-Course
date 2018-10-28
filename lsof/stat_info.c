@@ -8,58 +8,51 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <dirent.h>
-
-static const char* proc = "/proc/";
-static const char* statf = "/stat";
+#include <ctype.h>
 
 static char* get_stat_file(const char* pid)
 {
-	const size_t total_size = strlen(proc) + strlen(pid) + strlen(statf) + 1;
-	char* stat_file = (char*)calloc(total_size,sizeof(char));
-	strcpy(stat_file, proc);
-	strcat(stat_file, pid);
-	strcat(stat_file, statf);
+	const char* frm   = "/proc/%s/stat";
+	const int str_len = snprintf(NULL, 0, frm, pid) + 1;
+	char* stat_file   = calloc(str_len, 1);
+	snprintf(stat_file, str_len, frm, pid);
 
 	return stat_file;
 }
 
-static struct stat_info* allocate_stat_info()
-{
-	struct stat_info* stat_info = (struct stat_info*)calloc(1, sizeof(stat_info));
-                   	  stat_info->comm = (char*)calloc(1024,sizeof(char));
-
-    return stat_info;
-}
-
 struct stat_info* get_stat_info_for_pid(const char* pid)
 {
-	char*             stat_file_name = get_stat_file(pid);
-	FILE*             stat_file = fopen(stat_file_name, "r");
-	struct stat_info* stat_info = allocate_stat_info();
+	struct stat_info* si = NULL;
+	char*             fn = get_stat_file(pid);
+	FILE*             ff = fopen(fn, "r");
+	
+	if(ff == NULL)
+		goto out;
 
-	if((stat_file != NULL) && (stat_info != NULL))
+	si = calloc(1, sizeof(*si));
+	if(si != NULL)
 	{
-		fscanf(stat_file, "%d %s %c %d %d", 
-			&stat_info->pid, 
-			stat_info->comm, 
-			&stat_info->state, 
-			&stat_info->ppid, 
-			&stat_info->pgrp);
-
-		return stat_info;
+		fscanf(ff, "%d %s %c %d %d", 
+		&si->pid, 
+		si->comm, 
+		&si->state, 
+		&si->ppid, 
+		&si->pgrp);
 	}
-	else
-		return NULL;
+
+out:
+	fclose(ff);
+	free(fn);
+	return si;
 }
 
 int check_if_name_is_pid(const char* name)
 {
-	size_t len = strlen(name);
-	for(size_t i = 0; i < len; ++i)
-	{
-		if((name[i] < '0') || name[i] > '9')
+	const size_t len = strlen(name);
+	
+	for(int i = 0; i < len; ++i)
+		if(!isdigit(name[i]))
 			return 0;
-	}
-
+	
 	return 1;
 }

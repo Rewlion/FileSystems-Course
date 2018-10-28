@@ -7,123 +7,132 @@
 #include <unistd.h>
 #include <assert.h>
 
-const char* proc_dir_name = "/proc/";
-const char* fd_dir_name = "/fd";
-const char* stat_file_name = "/stat";
-
-const size_t fd_file_path_size = 1024;
-const size_t fd_name_size = 16;
+#define FD_NAME_SIZE (size_t)16
+#define FD_PATH_SIZE (size_t)1024
+#define COMMAND_SIZE (size_t)1024
 
 struct fd_info
 {
-	struct stat_info* pid_stat_info;
-	char* file_path;
-	char* fd;
+	char comm[COMMAND_SIZE];
+	int  ppid;
+	int  pgrp;	
+	char file_path[FD_PATH_SIZE];
+	char fd[FD_NAME_SIZE];
 };
-
-struct fd_info* allocate_fd_info()
-{
-	struct fd_info* fd_info = (struct fd_info*)calloc(1, sizeof(struct fd_info));
-					fd_info->file_path = (char*)calloc(fd_file_path_size, sizeof(char));
-					fd_info->fd = (char*)calloc(fd_name_size, sizeof(char));
-
-	return fd_info;
-}
 
 char* get_fd_dir_path(const char* pid)
 {
-	const size_t total_size = strlen(proc_dir_name) + strlen(pid) + strlen(fd_dir_name) + 1;
-	char* fd_dir_path = (char*)calloc(total_size,sizeof(char));
-	strcpy(fd_dir_path, proc_dir_name);
-	strcat(fd_dir_path, pid);
-	strcat(fd_dir_path, fd_dir_name);
+	const char* frm = "/proc/%s/fd";
+	const int   l = snprintf(NULL, 0, frm, pid) + 1;
+	char*       p = calloc(l, 1);
+	snprintf(p, l, frm, pid);
 	
-	return fd_dir_path;
+	return p;
 }
 
 char* get_fd_path(struct dirent* fd_dir_entry, const char* fd_dir_path)
 {
-	const size_t fd_name_len = strlen(fd_dir_entry->d_name);
-    char* fd_path = (char*)calloc(strlen(fd_dir_path) + 1/*/*/ + fd_name_len + 1, sizeof(char));
+	const char* frm = "%s/%s";
+	const int   l = snprintf(NULL, 0, frm, fd_dir_path, fd_dir_entry->d_name);
+	char*       p = calloc(l, 1);
+	snprintf(p, l, frm, fd_dir_path, fd_dir_entry->d_name);	
 
-    strcpy(fd_path, fd_dir_path);
-    strcat(fd_path, "/");
-    strcat(fd_path, fd_dir_entry->d_name);
-
-    return fd_path;
-}
-
-void fill_fd_info(struct fd_info* fd_info, struct dirent* fd_dir_entry, const char* fd_dir_path)
-{
-	char* fd_path = get_fd_path(fd_dir_entry, fd_dir_path);
-	
-	readlink(fd_path, fd_info->file_path, fd_file_path_size);	
-	strncpy(fd_info->fd, fd_dir_entry->d_name, fd_name_size);
-
-	free(fd_path);
+    return p;
 }
 
 void print_fd_info(struct fd_info* fd_info)
 {
-	if(fd_info->pid_stat_info != NULL)
+	printf("%-20s %5d %5d %5s %s\n", 
+			fd_info->comm,
+			fd_info->ppid,
+			fd_info->pgrp,
+			fd_info->fd,
+			fd_info->file_path);
+}
+
+void fill_fd_info(struct fd_info* fd_info, struct dirent* fd_dir_entry, const char* fd_dir_path)
+{
+	char* fp = get_fd_path(fd_dir_entry, fd_dir_path);
+	
+	readlink(fp, fd_info->file_path, FD_PATH_SIZE);	
+	strncpy(fd_info->fd, fd_dir_entry->d_name, FD_NAME_SIZE);
+
+	free(fp);
+}
+
+void fill_stat_info(struct fd_info* fd_info, const char* pid)
+{
+	struct stat_info* si = get_stat_info_for_pid(pid);	
+
+	if(si != NULL)
 	{
-		printf("%-20s %5d %5d", 
-			fd_info->pid_stat_info->comm,
-			fd_info->pid_stat_info->pid,
-			fd_info->pid_stat_info->pgrp);
+		strncpy(fd_info->comm, si->comm, COMMAND_SIZE);		
+		fd_info->ppid = si->ppid;
+		fd_info->pgrp = si->pgrp;
 	}
 	else
 	{
-		printf("%-20s %5s %5s", "???", "???", "???");
+		sprintf(fd_info->comm, "?");		
+		fd_info->ppid = -1;
+		fd_info->pgrp = -1;
 	}
-	
-	printf("%5s %s\n", fd_info->fd, fd_info->file_path);
+
+	free(si);
 }
 
 void print_openned_files_info_for_pid(const char* pid)
 {
-	struct fd_info* fd_info = allocate_fd_info();
-					fd_info->pid_stat_info = get_stat_info_for_pid(pid);
+	struct fd_info fi = {};
+	fill_stat_info(&fi, pid);
 
-	const char*     fd_dir_path = get_fd_dir_path(pid);	
-	DIR*            fd_dir = opendir(fd_dir_path);
+	char* dp = get_fd_dir_path(pid);	
+	DIR*  fd_dir = opendir(dp);	
 
 	if(fd_dir != NULL)
 	{
-		struct dirent*  fd_dir_entry = NULL;
-		while((fd_dir_entry = readdir(fd_dir)) != NULL)
+		struct dirent* de = NULL;
+		while((de = readdir(fd_dir)) != NULL)
 		{
-			if((strcmp(".",fd_dir_entry->d_name) && strcmp("..",fd_dir_entry->d_name)))
+			if((strcmp(".",de->d_name) && strcmp("..",de->d_name)))
 			{
-				fill_fd_info(fd_info, fd_dir_entry, fd_dir_path);
-				print_fd_info(fd_info);
+				fill_fd_info(&fi, de, dp);
+				print_fd_info(&fi);
 			}
 		}
 	}
 	else
 	{
-		fd_info->fd = "???";
-		fd_info->file_path = "???";
-		print_fd_info(fd_info);
+		sprintf(fi.fd, "?");
+		sprintf(fi.file_path, "?");
+		
+		print_fd_info(&fi);
 	}
-	
+
+	closedir(fd_dir);
+	free(dp);	
 }
 
 int main(int argc, char** argv)
 {
-	DIR*           proc_dir = opendir(proc_dir_name);
-	struct dirent* dir_entry = NULL;
-		
-	printf("%-20s %5s %5s %5s %s \n",
-		"COMMAND",
-		"PID",
-		"PGRP",
-		"FD",
-		"FILE");
-
-	while((dir_entry = readdir(proc_dir)) != NULL)
+	DIR* proc_dir = opendir("/proc/");
+	
+	if(proc_dir != NULL)
 	{
-		if(check_if_name_is_pid(dir_entry->d_name))			
-			print_openned_files_info_for_pid(dir_entry->d_name);
+		printf("%-20s %5s %5s %5s %s \n",
+			"COMMAND",
+			"PID",
+			"PGRP",
+			"FD",
+			"FILE");
+
+		struct dirent* dir_entry = NULL;
+
+		while((dir_entry = readdir(proc_dir)) != NULL)
+		{
+			if(check_if_name_is_pid(dir_entry->d_name))			
+				print_openned_files_info_for_pid(dir_entry->d_name);
+		}
 	}
+
+	closedir(proc_dir);
 }
